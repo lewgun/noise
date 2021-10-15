@@ -17,10 +17,12 @@ import (
 // A CipherState provides symmetric encryption and decryption after a successful
 // handshake.
 type CipherState struct {
-	cs CipherSuite
-	c  Cipher
-	k  [32]byte
-	n  uint64
+	cs        CipherSuite
+	c         Cipher
+	k         [32]byte
+	n         uint64
+
+	SharedKey [32]byte
 
 	invalid bool
 }
@@ -31,6 +33,17 @@ const MaxNonce = uint64(math.MaxUint64) - 1
 
 var ErrMaxNonce = errors.New("noise: cipherstate has reached maximum n, a new handshake must be performed")
 var ErrCipherSuiteCopied = errors.New("noise: CipherSuite has been copied, state is invalid")
+
+
+func NewIKCipher(cs CipherSuite, k [32]byte) *CipherState {
+	s := &CipherState{
+		cs: cs,
+		invalid: true,
+	}
+	s.c = s.cs.Cipher(k)
+	return s
+}
+
 
 // Encrypt encrypts the plaintext and then appends the ciphertext and an
 // authentication tag across the ciphertext and optional authenticated data to
@@ -175,6 +188,7 @@ func (s *symmetricState) Split() (*CipherState, *CipherState) {
 	hk1, hk2, _ := hkdf(s.cs.Hash, 2, s1.k[:0], s2.k[:0], nil, s.ck, nil)
 	copy(s1.k[:], hk1)
 	copy(s2.k[:], hk2)
+	copy(s1.SharedKey[:], hk1)
 	s1.c = s.cs.Cipher(s1.k)
 	s2.c = s.cs.Cipher(s2.k)
 	return s1, s2

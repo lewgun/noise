@@ -1,6 +1,8 @@
 package noise
 
 import (
+	"bytes"
+	"crypto/rand"
 	"encoding/hex"
 	"math"
 	"testing"
@@ -615,4 +617,80 @@ func (NoiseSuite) TestRekey(c *C) {
 	msg, err = csI1.Decrypt(nil, nil, nil)
 	c.Assert(err, Equals, ErrMaxNonce)
 	c.Assert(msg, IsNil)
+}
+
+func TestNewCipher(t *testing.T) {
+	suite :=  NewCipherSuite(DH25519, CipherChaChaPoly, HashBLAKE2s)
+
+	// Generate the static key for the current node.
+	staticSrvKey, err := DH25519.GenerateKeypair(rand.Reader)
+	if err != nil {
+		return
+	}
+	noiseSrvCfg := Config{
+		CipherSuite:   suite,
+		Pattern:       HandshakeIK,
+		StaticKeypair: staticSrvKey,
+		Initiator:     false,
+	}
+
+
+	// Generate the static key for the current node.
+	staticCliKey, err := DH25519.GenerateKeypair(rand.Reader)
+	if err != nil {
+		return
+	}
+	noiseCliCfg := Config{
+		CipherSuite:   suite,
+		Pattern:      HandshakeIK,
+		Initiator:     true,
+		StaticKeypair: staticCliKey,
+		PeerStatic:    staticSrvKey.Public,
+	}
+
+	stateCli, err := NewHandshakeState(noiseCliCfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	stateSrv, err := NewHandshakeState(noiseSrvCfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	stateCliMsg, _, _, _ := stateCli.WriteMessage(nil, nil)
+
+	stateSrv.ReadMessage(nil, stateCliMsg)
+
+	stateSrvMsg, decSrv, _, err := stateSrv.WriteMessage(nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	cipher2 := NewIKCipher(suite, decSrv.SharedKey)
+
+	_, encCli, _, err := stateCli.ReadMessage(nil, stateSrvMsg)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	rawStr := "abc"
+	ciphertext := encCli.Cipher().Encrypt(nil, 1, nil, []byte(rawStr))
+	plain, _ := decSrv.Cipher().Decrypt(nil, 1, nil, ciphertext)
+
+	plain2, err := cipher2.Cipher().Decrypt(nil, 1, nil, ciphertext)
+	if bytes.Compare(plain ,plain2) != 0 {
+		t.Fatalf("want: %s, actual: %s %v", rawStr, string(plain2), err )
+	}
+
+	rawStr = "123"
+	ciphertext = decSrv.Cipher().Encrypt(nil, 1, nil, []byte(rawStr))
+	plain, _ = encCli.Cipher().Decrypt(nil, 1, nil, ciphertext)
+
+	ciphertext = cipher2.Cipher().Encrypt(nil, 1, nil, []byte(rawStr))
+	plain2, err = encCli.Cipher().Decrypt(nil, 1, nil, ciphertext)
+	if bytes.Compare(plain ,plain2) != 0 {
+		t.Fatalf("want: %s, actual: %s %v", rawStr, string(plain2), err )
+	}
+
 }
